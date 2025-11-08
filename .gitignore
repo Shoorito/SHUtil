@@ -1,3 +1,5 @@
 .vs/
 SHUtil/bin/
 SHUtil/obj/
+SHUtil.Tests/
+.github/copilot-instructions.md

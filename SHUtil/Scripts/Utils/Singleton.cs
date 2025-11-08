@@ -14,31 +14,13 @@
 
 namespace SHUtil
 {
+    /// <summary>
+    /// 스레드 안전한 제네릭 싱글톤 기반 클래스입니다.
+    /// </summary>
     public class Singleton<T> where T : class, new()
     {
-        private static T sInstance = null;
+        private static readonly T sInstance = new T();
 
-        //----------------------------------------------------------------------------------
-        public static T Instance
-        {
-            get
-            {
-                if (sInstance == null)
-                {
-                    sInstance = System.Activator.CreateInstance<T>();
-                }
-
-                return sInstance;
-            }
-        }
-
-        //----------------------------------------------------------------------------------
-        public static void ClearInstance()
-        {
-            if (sInstance != null)
-            {
-                sInstance = null;
-            }
-        }
+        public static T Instance => sInstance;
     }
 }

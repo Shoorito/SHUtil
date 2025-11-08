@@ -16,7 +16,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
@@ -45,7 +44,7 @@ namespace SHUtil
             if (selected_node == null)
                 return default(ParseType);
 
-            ParseType pt = Activator.CreateInstance<ParseType>();
+            var pt = new ParseType();
             pt._Load(selected_node);
 
             return pt;
@@ -213,10 +212,10 @@ namespace SHUtil
             for (int i = begin_idx; i <= attr_count; i++)
             {
                 string attr_name = $"{name}_{i}";
-                if (selector.HasAttribute(attr_name) == true)
+                if (selector.HasAttribute(attr_name))
                 {
                     string str_value = ParseAttribute<string>(selector, attr_name, "");
-                    if (string.IsNullOrEmpty(str_value) == false || ignore_empty == false)
+                    if (!string.IsNullOrEmpty(str_value) || !ignore_empty)
                     {
                         if (list == null)
                             list = new List<ParseType>();
@@ -232,13 +231,13 @@ namespace SHUtil
         //----------------------------------------------------------------------------------
         public static string EncodeXml<T>(T data)
         {
-            StringBuilder builder = new StringBuilder();
-            StringWriter writer = new StringWriter(builder);
+            var builder = new StringBuilder();
+            var writer = new StringWriter(builder);
 
-            XmlSerializerNamespaces ns = new XmlSerializerNamespaces();
+            var ns = new XmlSerializerNamespaces();
             ns.Add("", "");
 
-            XmlSerializer encoder = new XmlSerializer(typeof(T));
+            var encoder = new XmlSerializer(typeof(T));
             encoder.Serialize(writer, data, ns);
             writer.Close();
 
@@ -248,114 +247,35 @@ namespace SHUtil
         //----------------------------------------------------------------------------------
         public static T DecodeXml<T>(string data)
         {
-            XmlSerializer decode = new XmlSerializer(typeof(T));
-            MemoryStream read_stream = new MemoryStream(Encoding.UTF8.GetBytes(data));
-            T type = (T)decode.Deserialize(read_stream);
-            read_stream.Close();
-
-            return type;
+            var decoder = new XmlSerializer(typeof(T));
+            using (var ms = new MemoryStream(Encoding.UTF8.GetBytes(data)))
+                return (T)decoder.Deserialize(ms);
         }
 
         //----------------------------------------------------------------------------------
         public static bool SaveXmlDocToFile(string file_path, XmlDocument doc)
         {
-            if (string.IsNullOrEmpty(file_path) == true || doc == null)
+            if (string.IsNullOrEmpty(file_path) || doc == null)
                 return false;
 
             string dir_path = Path.GetDirectoryName(file_path);
-            if (Directory.Exists(dir_path) == false)
+            if (!string.IsNullOrEmpty(dir_path) && !Directory.Exists(dir_path))
                 Directory.CreateDirectory(dir_path);
 
             doc.Save(file_path);
-
-            return true;
-        }
-
-        //----------------------------------------------------------------------------------
-        public static bool SaveXmlDocToEncryptFile(string file_path, XmlDocument doc, string key)
-        {
-            FileStream file_stream = GetFileStream(file_path);
-            if (file_stream == null)
-                return false;
-
-            DESCryptoServiceProvider des = new DESCryptoServiceProvider();
-            des.Key = Encoding.ASCII.GetBytes(key);
-            des.IV = Encoding.ASCII.GetBytes(key);
-
-            CryptoStream crypto_stream = new CryptoStream(file_stream, des.CreateEncryptor(), CryptoStreamMode.Write);
-            if (crypto_stream == null)
-            {
-                file_stream.Close();
-                return false;
-            }
-
-            StreamWriter stream_writer = new StreamWriter(crypto_stream, Encoding.UTF8);
-            if (stream_writer == null)
-            {
-                crypto_stream.Close();
-                file_stream.Close();
-            }
-
-            crypto_stream.Close();
-            file_stream.Close();
-
-            doc.Save(stream_writer);
-            stream_writer.Close();
             return true;
         }
 
         //----------------------------------------------------------------------------------
         public static bool SaveXmlToFile(string file_path, string xml)
         {
-            FileStream file_stream = GetFileStream(file_path);
-            if (file_stream == null)
+            var fileStream = GetFileStream(file_path);
+            if (fileStream == null)
                 return false;
 
-            StreamWriter stream_writer = new StreamWriter(file_stream, Encoding.UTF8);
-            if (stream_writer == null)
-            {
-                file_stream.Close();
-                return false;
-            }
-
-            file_stream.Close();
-
-            stream_writer.Write(xml);
-            stream_writer.Close();
-            return true;
-        }
-
-        //----------------------------------------------------------------------------------
-        public static bool SaveXmlToEncryptFile(string file_path, string xml, string key)
-        {
-            FileStream file_stream = GetFileStream(file_path);
-            if (file_stream == null)
-                return false;
-
-            DESCryptoServiceProvider des = new DESCryptoServiceProvider();
-            des.Key = Encoding.ASCII.GetBytes(key);
-            des.IV = Encoding.ASCII.GetBytes(key);
-
-            CryptoStream crypto_stream = new CryptoStream(file_stream, des.CreateEncryptor(), CryptoStreamMode.Write);
-            if (crypto_stream == null)
-            {
-                file_stream.Close();
-                return false;
-            }
-
-            StreamWriter stream_writer = new StreamWriter(crypto_stream, Encoding.UTF8);
-            if (stream_writer == null)
-            {
-                file_stream.Close();
-                crypto_stream.Close();
-                return false;
-            }
-
-            file_stream.Close();
-            crypto_stream.Close();
-
-            stream_writer.Write(xml);
-            stream_writer.Close();
+            using (fileStream)
+            using (var writer = new StreamWriter(fileStream, new UTF8Encoding(false)))
+                writer.Write(xml);
 
             return true;
         }
@@ -364,111 +284,54 @@ namespace SHUtil
         private static FileStream GetFileStream(string file_path)
         {
             string dir_name = Path.GetDirectoryName(file_path);
-            if (Directory.Exists(dir_name) == false)
+            if (!string.IsNullOrEmpty(dir_name) && !Directory.Exists(dir_name))
                 Directory.CreateDirectory(dir_name);
 
-            if (File.Exists(file_path) == false)
-                return null;
-
-            FileStream file_stream = null;
             try
             {
-                file_stream = File.Open(file_path, FileMode.Create, FileAccess.Write, FileShare.Read);
+                return new FileStream(file_path, FileMode.Create, FileAccess.Write, FileShare.Read);
             }
-            catch (IOException io_exception)
+            catch
             {
-                if (file_stream != null)
-                    file_stream.Close();
-
-                try
-                {
-                    file_stream = File.Open(file_path, FileMode.Create, FileAccess.Write, FileShare.Read);
-                }
-                catch (System.Exception e)
-                {
-                    if (file_stream != null)
-                        file_stream.Close();
-
-                    return null;
-                }
+                return null;
             }
-
-            return file_stream;
         }
 
         //----------------------------------------------------------------------------------
         public static XmlDocument LoadXmlFromFile(string file_path)
         {
-            if (File.Exists(file_path) == false)
+            if (!File.Exists(file_path))
             {
-                SHLog.LogError($"[ERROR] XmlDocument Load Fail: {file_path}, please check if the XML file exists at the file path...");
+                SHLog.LogError($"[ERROR] XmlDocument Load Fail: {file_path}");
                 return null;
             }
 
-            StreamReader stream_reader = new StreamReader(file_path, Encoding.UTF8);
-            if (stream_reader == null)
-                return null;
-
-            XmlDocument doc = new XmlDocument();
-            doc.Load(stream_reader);
-            stream_reader.Close();
-            return doc;
+            using (var reader = new StreamReader(file_path, Encoding.UTF8))
+            {
+                var doc = new XmlDocument();
+                doc.Load(reader);
+                return doc;
+            }
         }
 
         //----------------------------------------------------------------------------------
         public static string LoadXmlStrFromFile(string file_path)
         {
-            if (File.Exists(file_path) == false)
+            if (!File.Exists(file_path))
             {
-                SHLog.LogError($"[ERROR] XmlDocument Load Fail: {file_path}, please check if the XML file exists at the file path...");
+                SHLog.LogError($"[ERROR] XmlDocument Load Fail: {file_path}");
                 return null;
             }
 
-            StreamReader stream_reader = new StreamReader(file_path, Encoding.UTF8);
-            if (stream_reader == null)
-                return null;
-
-            string xml_str = stream_reader.ReadToEnd();
-            stream_reader.Close();
-            return xml_str;
-        }
-
-        //----------------------------------------------------------------------------------
-        public static string LoadXmlStrFromEncryptFile(string file_path, string key)
-        {
-            FileStream file_stream = GetFileStream(file_path);
-            if (file_stream == null)
-                return "";
-
-            DESCryptoServiceProvider des = new DESCryptoServiceProvider();
-            des.Key = Encoding.ASCII.GetBytes(key);
-            des.IV = Encoding.ASCII.GetBytes(key);
-
-            CryptoStream crypto_stream = new CryptoStream(file_stream, des.CreateDecryptor(), CryptoStreamMode.Read);
-            if (crypto_stream == null)
-            {
-                file_stream.Close();
-                return "";
-            }
-
-            StreamReader stream_reader = new StreamReader(crypto_stream, Encoding.UTF8);
-            if (stream_reader == null)
-                return "";
-
-            string xml_str = stream_reader.ReadToEnd();
-
-            file_stream.Close();
-            stream_reader.Close();
-            crypto_stream.Close();
-
-            return xml_str;
+            using (var reader = new StreamReader(file_path, Encoding.UTF8))
+                return reader.ReadToEnd();
         }
 
         //----------------------------------------------------------------------------------
         public static string ConvertXmlTextPreDefined(object value, bool also_predefined, bool process_trim)
         {
             string convert_text = value.ToString();
-            if (also_predefined == true)
+            if (also_predefined)
             {
                 convert_text = convert_text.Replace("\r\n", "\\n").Replace("\n", "\\n").Replace("\r", "\\n").Replace("\t", "\\t").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("'", "&apos;").Replace("\"", "&quot;");
                 convert_text = convert_text.Replace("_x000D_", "\\n");
@@ -478,7 +341,7 @@ namespace SHUtil
                 convert_text = convert_text.Replace("\r\n", "\\n").Replace("\n", "\\n").Replace("\r", "\\n").Replace("\t", "\\t");
             }
 
-            if (process_trim == true)
+            if (process_trim)
                 convert_text = convert_text.Trim();
 
             int end_idx = convert_text.Length;
@@ -503,8 +366,6 @@ namespace SHUtil
                 .Replace("&lt;", "<")
                 .Replace("&amp;", "&")
                 .Replace("\\n", "\n")
-                .Replace("\\n", "\n")
-                .Replace("\\n", "\r")
                 .Replace("\\t", "\t");
         }
 
@@ -530,7 +391,7 @@ namespace SHUtil
 
             try
             {
-                XmlDocument doc = new XmlDocument();
+                var doc = new XmlDocument();
                 doc.Load(new MemoryStream(byte_data));
                 return doc;
             }
@@ -546,12 +407,12 @@ namespace SHUtil
         //----------------------------------------------------------------------------------
         public static XmlDocument SafeLoad(string xml_str, Action<string> error_callback = null)
         {
-            if (string.IsNullOrEmpty(xml_str) == true)
+            if (string.IsNullOrEmpty(xml_str))
                 return null;
 
             try
             {
-                XmlDocument doc = new XmlDocument();
+                var doc = new XmlDocument();
                 doc.LoadXml(xml_str);
                 return doc;
             }
@@ -573,7 +434,7 @@ namespace SHUtil
 
             string attr_value = attr.Value;
             TypeConverter converter = TypeDescriptor.GetConverter(typeof(T));
-            if (converter != null && converter.IsValid(attr_value) == true)
+            if (converter != null && converter.IsValid(attr_value))
             {
                 return (T)(converter.ConvertFromString(attr_value));
             }
@@ -584,7 +445,7 @@ namespace SHUtil
         //----------------------------------------------------------------------------------
         public static XmlNode GetNode(XmlDocument doc, string find_node_name)
         {
-            if (doc == null || doc.DocumentElement == null || string.IsNullOrEmpty(find_node_name) == true)
+            if (doc == null || doc.DocumentElement == null || string.IsNullOrEmpty(find_node_name))
                 return null;
 
             XmlNodeList find_nodes = doc.GetElementsByTagName(find_node_name);

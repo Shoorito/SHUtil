@@ -20,6 +20,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Xml;
 
+
 namespace SHUtil.Table
 {
     public enum eTableDataType
@@ -38,6 +39,8 @@ namespace SHUtil.Table
         public void LoadData(byte[] rawData);
         public void LoadDataAsync(string filePath, string encryptPassword = "");
         public void LoadDataAsync(byte[] rawData);
+        public Task LoadAsync(string filePath, string encryptPassword = "");
+        public Task LoadAsync(byte[] rawData);
     }
 
     //----------------------------------------------------------------------------------
@@ -78,7 +81,7 @@ namespace SHUtil.Table
             if (mLoadCompleted)
                 return;
 
-            if (PathUtil.IsValidPath(filePath, true) == false)
+            if (!PathUtil.IsValidPath(filePath, true))
             {
                 IsInvalid = true;
                 return;
@@ -109,7 +112,7 @@ namespace SHUtil.Table
             }
 
             var bytes = rawData;
-            if (IsEncrypted && mEncryptPassword.Length > 0)
+            if (IsEncrypted && !string.IsNullOrEmpty(mEncryptPassword))
             {
                 try
                 {
@@ -158,7 +161,7 @@ namespace SHUtil.Table
                     return;
             }
 
-            if (IsInvalid == false)
+            if (!IsInvalid)
                 Postload();
 
             mLoadCompleted = true;
@@ -243,11 +246,11 @@ namespace SHUtil.Table
         //----------------------------------------------------------------------------------
         private void SetInfoData(int rowIdx, string rawKey, object value)
         {
-            if (string.IsNullOrEmpty(rawKey) || string.IsNullOrWhiteSpace(rawKey))
+            if (string.IsNullOrWhiteSpace(rawKey))
                 return;
 
             int intKey = 0;
-            if (IsStringKey == false)
+            if (!IsStringKey)
             {
                 try
                 {
@@ -260,7 +263,7 @@ namespace SHUtil.Table
 
                 if (mInfosForInt.TryGetValue(intKey, out var cachedValue))
                 {
-                    if (CheckSameKey == false)
+                    if (!CheckSameKey)
                         cachedValue.LoadAppend(value);
 
                     return;
@@ -270,14 +273,14 @@ namespace SHUtil.Table
             {
                 if (mInfosForStr.TryGetValue(rawKey, out var cachedValue))
                 {
-                    if (CheckSameKey == false)
+                    if (!CheckSameKey)
                         cachedValue.LoadAppend(value);
 
                     return;
                 }
             }
 
-            var valueData = Activator.CreateInstance<ValueType>();
+            var valueData = new ValueType();
             if (IsStringKey)
                 valueData.InitById(rowIdx, rawKey);
             else
@@ -303,6 +306,12 @@ namespace SHUtil.Table
             Task.Run(() => InternalLoadDataAsync(rawData));
         }
 
+        public Task LoadAsync(string filePath, string encryptPassword = "") =>
+            InternalLoadDataAsync(filePath, encryptPassword);
+
+        public Task LoadAsync(byte[] rawData) =>
+            InternalLoadDataAsync(rawData);
+
         //----------------------------------------------------------------------------------
         protected async virtual Task InternalLoadDataAsync(string filePath, string encryptPassword = "")
         {
@@ -310,7 +319,7 @@ namespace SHUtil.Table
                 return;
 
             bool isValidPath = await Task.Run(() => PathUtil.IsValidPath(filePath, true));
-            if (isValidPath == false)
+            if (!isValidPath)
             {
                 IsInvalid = true;
                 return;
@@ -350,7 +359,7 @@ namespace SHUtil.Table
             }
 
             var bytes = rawData;
-            if (IsEncrypted && mEncryptPassword.Length > 0)
+            if (IsEncrypted && !string.IsNullOrEmpty(mEncryptPassword))
             {
                 try
                 {
@@ -399,7 +408,7 @@ namespace SHUtil.Table
                     return;
             }
 
-            if (IsInvalid == false)
+            if (!IsInvalid)
                 await Task.Run(Postload);
 
             mLoadCompleted = true;
@@ -421,7 +430,7 @@ namespace SHUtil.Table
             if (IsStringKey)
                 return default;
 
-            if (mInfosForInt.TryGetValue(intKey, out var info) == false)
+            if (!mInfosForInt.TryGetValue(intKey, out var info))
                 return default;
 
             return info;
@@ -430,10 +439,10 @@ namespace SHUtil.Table
         //----------------------------------------------------------------------------------
         public ValueType GetInfoByStrKey(string strKey)
         {
-            if (IsStringKey == false)
+            if (!IsStringKey)
                 return default;
 
-            if (mInfosForStr.TryGetValue(strKey, out var info) == false)
+            if (!mInfosForStr.TryGetValue(strKey, out var info))
                 return default;
 
             return info;

@@ -1,4 +1,4 @@
-﻿//////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
 //
 // FileUtil
 // 
@@ -19,329 +19,187 @@ using System.Text;
 
 namespace SHUtil
 {
+    /// <summary>
+    /// 파일 암호화/복호화 및 텍스트 디코딩 기능을 제공합니다.
+    /// 암호화 포맷: [SALT:16][NONCE:12][TAG:16][CIPHERTEXT:N]
+    /// </summary>
     public static class FileUtil
     {
-        private const int SALT_SIZE = 16;   // 128-bit
-        private const int IV_SIZE = 16;     // AES Block Size (128-bit)
-        private const int KEY_SIZE = 32;    // 256-bit
-        private const int HMAC_SIZE = 32;
-        private const int PBKDF2_ITER = 100000;
+        private const int SALT_SIZE         = 16;
+        private const int NONCE_SIZE        = 12;   // AES-GCM 표준 nonce 크기
+        private const int TAG_SIZE          = 16;   // AES-GCM 인증 태그 크기
+        private const int KEY_SIZE          = 32;   // AES-256
+        private const int PBKDF2_ITERATIONS = 600_000;
 
+        private static readonly HashAlgorithmName PBKDF2_HASH = HashAlgorithmName.SHA256;
+
+        /// <summary>
+        /// 파일을 AES-256-GCM으로 암호화합니다.
+        /// </summary>
+        /// <param name="srcFilePath">원본 파일 경로</param>
+        /// <param name="dstFilePath">암호화된 파일 저장 경로</param>
+        /// <param name="password">암호화에 사용할 비밀번호</param>
+        /// <returns>성공 시 true</returns>
         //----------------------------------------------------------------------------------
         public static bool Encrypt(string srcFilePath, string dstFilePath, string password)
         {
-            if (PathUtil.IsValidPath(srcFilePath) == false ||
-                PathUtil.IsValidPath(dstFilePath) == false ||
-                string.IsNullOrEmpty(password) ||
+            if (!PathUtil.IsValidPath(srcFilePath) ||
+                !PathUtil.IsValidPath(dstFilePath) ||
                 string.IsNullOrWhiteSpace(password))
                 return false;
 
-            var iv = new byte[IV_SIZE];
-            var salt = new byte[SALT_SIZE];
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(salt);
-                rng.GetBytes(iv);
-            }
+            var salt  = new byte[SALT_SIZE];
+            var nonce = new byte[NONCE_SIZE];
+            RandomNumberGenerator.Fill(salt);
+            RandomNumberGenerator.Fill(nonce);
 
-            byte[] enc_key = null;
-            byte[] mac_key = null;
-            DeriveKeys(password, salt, out enc_key, out mac_key);
+            var key    = DeriveKey(password, salt);
+            var plain  = File.ReadAllBytes(srcFilePath);
+            var cipher = new byte[plain.Length];
+            var tag    = new byte[TAG_SIZE];
 
-            var plain = File.ReadAllBytes(srcFilePath);
-            var cipher = EncryptAesCbc(plain, enc_key, iv);
-            var hmacInput = Concat(salt, iv, cipher);
-            var hmac = ComputeHmacSha256(mac_key, hmacInput);
+            using (var aesGcm = new AesGcm(key))
+                aesGcm.Encrypt(nonce, plain, cipher, tag);
 
-            string dstDirPath = Path.GetDirectoryName(dstFilePath);
-            if (PathUtil.IsValidPath(dstDirPath) == false)
-                Directory.CreateDirectory(dstDirPath);
+            var dstDir = Path.GetDirectoryName(dstFilePath);
+            if (!string.IsNullOrEmpty(dstDir) && !Directory.Exists(dstDir))
+                Directory.CreateDirectory(dstDir);
 
             using (var fs = new FileStream(dstFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                fs.Write(salt, 0, salt.Length);
-                fs.Write(iv, 0, iv.Length);
+                fs.Write(salt,   0, salt.Length);
+                fs.Write(nonce,  0, nonce.Length);
+                fs.Write(tag,    0, tag.Length);
                 fs.Write(cipher, 0, cipher.Length);
-                fs.Write(hmac, 0, hmac.Length);
             }
 
             return true;
         }
 
+        /// <summary>
+        /// 바이트 배열을 복호화합니다. 인증 실패 또는 잘못된 입력 시 null을 반환합니다.
+        /// </summary>
         //----------------------------------------------------------------------------------
         public static byte[] DecryptWithBytes(byte[] allBytes, string password)
         {
-            if (allBytes.Length < (SALT_SIZE + IV_SIZE + HMAC_SIZE))
+            if (allBytes == null || string.IsNullOrWhiteSpace(password))
                 return null;
 
-            int off = 0;
-            var salt = new byte[SALT_SIZE];
-            Buffer.BlockCopy(allBytes, off, salt, 0, SALT_SIZE);
-            off += SALT_SIZE;
-
-            var iv = new byte[IV_SIZE];
-            Buffer.BlockCopy(allBytes, off, iv, 0, IV_SIZE);
-            off += IV_SIZE;
-
-            int cipherLen = allBytes.Length - off - HMAC_SIZE;
-            if (cipherLen <= 0)
+            int headerSize = SALT_SIZE + NONCE_SIZE + TAG_SIZE;
+            if (allBytes.Length <= headerSize)
                 return null;
 
-            var cipher = new byte[cipherLen];
-            Buffer.BlockCopy(allBytes, off, cipher, 0, cipherLen);
-            off += cipherLen;
+            var salt   = allBytes[..SALT_SIZE];
+            var nonce  = allBytes[SALT_SIZE..(SALT_SIZE + NONCE_SIZE)];
+            var tag    = allBytes[(SALT_SIZE + NONCE_SIZE)..(SALT_SIZE + NONCE_SIZE + TAG_SIZE)];
+            var cipher = allBytes[(SALT_SIZE + NONCE_SIZE + TAG_SIZE)..];
 
-            var hmac = new byte[HMAC_SIZE];
-            Buffer.BlockCopy(allBytes, off, hmac, 0, HMAC_SIZE);
+            var key   = DeriveKey(password, salt);
+            var plain = new byte[cipher.Length];
 
-            byte[] enc_key = null;
-            byte[] mac_key = null;
-            DeriveKeys(password, salt, out enc_key, out mac_key);
+            try
+            {
+                using (var aesGcm = new AesGcm(key))
+                    aesGcm.Decrypt(nonce, cipher, tag, plain);
 
-            var hmac_input = Concat(salt, iv, cipher);
-            var computed = ComputeHmacSha256(mac_key, hmac_input);
-            if (ConstantTimeNotEqual(hmac, computed))
+                return plain;
+            }
+            catch (CryptographicException)
+            {
                 return null;
-
-            var plain = DecryptAesCbc(cipher, enc_key, iv);
-            return plain;
+            }
         }
 
+        /// <summary>
+        /// 파일을 복호화하여 바이트 배열로 반환합니다. 실패 시 null을 반환합니다.
+        /// </summary>
         //----------------------------------------------------------------------------------
         public static byte[] Decrypt(string filePath, string password)
         {
-            if (PathUtil.IsValidPath(filePath) == false ||
-                string.IsNullOrEmpty(password) ||
-                string.IsNullOrWhiteSpace(password))
+            if (!PathUtil.IsValidPath(filePath) || string.IsNullOrWhiteSpace(password))
                 return null;
 
-            var allBytes = File.ReadAllBytes(filePath);
-            return DecryptWithBytes(allBytes, password);
+            return DecryptWithBytes(File.ReadAllBytes(filePath), password);
         }
 
-        //----------------------------------------------------------------------------------
-        private static void DeriveKeys(string password, byte[] salt, out byte[] encKey, out byte[] macKey)
-        {
-            using (var pbkdf2 = new Rfc2898DeriveBytes(password, salt, PBKDF2_ITER))
-            {
-                encKey = pbkdf2.GetBytes(KEY_SIZE);
-                macKey = pbkdf2.GetBytes(KEY_SIZE);
-            }
-        }
-
-        //----------------------------------------------------------------------------------
-        private static byte[] EncryptAesCbc(byte[] plain, byte[] key, byte[] iv)
-        {
-            using (var aes = Aes.Create())
-            {
-                aes.KeySize = 256;
-                aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.PKCS7;
-                aes.Key = key;
-                aes.IV = iv;
-
-                using (var ms = new MemoryStream())
-                {
-                    using (var enc = aes.CreateEncryptor())
-                    {
-                        using (var cs = new CryptoStream(ms, enc, CryptoStreamMode.Write))
-                        {
-                            cs.Write(plain, 0, plain.Length);
-                            cs.FlushFinalBlock();
-                            return ms.ToArray();
-                        }
-                    }
-                }
-            }
-        }
-
-        //----------------------------------------------------------------------------------
-        private static byte[] DecryptAesCbc(byte[] cipher, byte[] key, byte[] iv)
-        {
-            using (var aes = Aes.Create())
-            {
-                aes.KeySize = 256;
-                aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.PKCS7;
-                aes.Key = key;
-                aes.IV = iv;
-
-                using (var ms = new MemoryStream())
-                {
-                    using (var dec = aes.CreateDecryptor())
-                    {
-                        using (var cs = new CryptoStream(ms, dec, CryptoStreamMode.Write))
-                        {
-                            cs.Write(cipher, 0, cipher.Length);
-                            cs.FlushFinalBlock();
-                            return ms.ToArray();
-                        }
-                    }
-                }
-            }
-        }
-
-        //----------------------------------------------------------------------------------
-        private static byte[] ComputeHmacSha256(byte[] key, byte[] data)
-        {
-            using (var h = new HMACSHA256(key))
-            {
-                return h.ComputeHash(data);
-            }
-        }
-
-        //----------------------------------------------------------------------------------
-        private static byte[] Concat(byte[] a, byte[] b, byte[] c)
-        {
-            var r = new byte[a.Length + b.Length + c.Length];
-            Buffer.BlockCopy(a, 0, r, 0, a.Length);
-            Buffer.BlockCopy(b, 0, r, a.Length, b.Length);
-            Buffer.BlockCopy(c, 0, r, a.Length + b.Length, c.Length);
-
-            return r;
-        }
-
-        //----------------------------------------------------------------------------------
-        private static bool ConstantTimeNotEqual(byte[] a, byte[] b)
-        {
-            if (a.Length != b.Length)
-                return true;
-
-            int diff = 0;
-            for (int i = 0; i < a.Length; i++)
-            {
-                diff |= a[i] ^ b[i];
-            }
-
-            return diff != 0;
-        }
-
+        /// <summary>
+        /// 암호화된 파일을 복호화 후 문자열로 변환합니다. BOM 기반 인코딩을 자동 감지합니다.
+        /// 실패 시 null을 반환합니다.
+        /// </summary>
         //----------------------------------------------------------------------------------
         public static string TryDecryptToString(string filePath, string password)
         {
-            // BOM 검사
             var plainBytes = Decrypt(filePath, password);
-            string fromBOM = TryDecodeWithBom(plainBytes);
+            if (plainBytes == null)
+                return null;
+
+            var fromBOM = TryDecodeWithBom(plainBytes);
             if (fromBOM != null)
                 return fromBOM;
 
-            // UTF-8 시도(유효하지 않으면 DecoderFallbackException이 발생하게 설정)
-            try
+            Encoding[] encodings =
             {
-                var utf8Str = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(plainBytes);
-                return utf8Str;
-            }
-            catch
-            {
-                // 실패시 다음 시도
-            }
+                new UTF8Encoding(false, true),
+                new UnicodeEncoding(false, false, true),
+                new UnicodeEncoding(true,  false, true),
+                new UTF32Encoding(false, false, true),
+            };
 
-            // UTF-16LE 시도
-            try
+            foreach (var enc in encodings)
             {
-                var utf16le = new UnicodeEncoding(bigEndian: false, byteOrderMark: false, throwOnInvalidBytes: true).GetString(plainBytes);
-                return utf16le;
-            }
-            catch
-            {
-                // 실패시 다음 시도
-            }
-
-            // UTF-16BE 시도
-            try
-            {
-                var utf16be = new UnicodeEncoding(bigEndian: true, byteOrderMark: false, throwOnInvalidBytes: true).GetString(plainBytes);
-                return utf16be;
-            }
-            catch
-            {
-                // 실패시 다음 시도
-            }
-
-            // UTF-32 시도
-            try
-            {
-                var utf32 = new UTF32Encoding(bigEndian: false, byteOrderMark: false, throwOnInvalidCharacters: true).GetString(plainBytes);
-                return utf32;
-            }
-            catch
-            {
-                // 실패시 다음 시도
+                try { return enc.GetString(plainBytes); }
+                catch { /* 다음 인코딩 시도 */ }
             }
 
             return null;
         }
 
-        // BOM 기반 디코딩 시도: 성공하면 문자열, 실패하면 null
+        //----------------------------------------------------------------------------------
+        private static byte[] DeriveKey(string password, byte[] salt)
+        {
+            using (var pbkdf2 = new Rfc2898DeriveBytes(password, salt, PBKDF2_ITERATIONS, PBKDF2_HASH))
+                return pbkdf2.GetBytes(KEY_SIZE);
+        }
+
         //----------------------------------------------------------------------------------
         private static string TryDecodeWithBom(byte[] bytes)
         {
-            if (bytes == null || bytes.Length <= 0)
+            if (bytes == null || bytes.Length == 0)
                 return string.Empty;
 
-            // UTF-8 BOM EF BB BF
+            // UTF-8 BOM: EF BB BF
             if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
             {
-                try
-                {
-                    return new UTF8Encoding(false, true).GetString(bytes, 3, bytes.Length - 3);
-                }
-                catch
-                {
-                    return null;
-                }
+                try { return new UTF8Encoding(false, true).GetString(bytes, 3, bytes.Length - 3); }
+                catch { return null; }
             }
 
-            // UTF-16 LE BOM FF FE
-            if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
-            {
-                try
-                {
-                    return new UnicodeEncoding(false, true, true).GetString(bytes, 2, bytes.Length - 2);
-                }
-                catch
-                {
-                    return null;
-                }
-            }
-
-            // UTF-16 BE BOM FE FF
-            if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
-            {
-                try
-                {
-                    return new UnicodeEncoding(true, true, true).GetString(bytes, 2, bytes.Length - 2);
-                }
-                catch
-                {
-                    return null;
-                }
-            }
-
-            // UTF-32 LE BOM FF FE 00 00
+            // UTF-32 LE BOM: FF FE 00 00 (UTF-16 LE보다 먼저 체크해야 함)
             if (bytes.Length >= 4 && bytes[0] == 0xFF && bytes[1] == 0xFE && bytes[2] == 0x00 && bytes[3] == 0x00)
             {
-                try
-                {
-                    return new UTF32Encoding(false, true, true).GetString(bytes, 4, bytes.Length - 4);
-                }
-                catch
-                {
-                    return null;
-                }
+                try { return new UTF32Encoding(false, true, true).GetString(bytes, 4, bytes.Length - 4); }
+                catch { return null; }
             }
 
-            // UTF-32 BE BOM 00 00 FE FF
+            // UTF-16 LE BOM: FF FE
+            if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            {
+                try { return new UnicodeEncoding(false, true, true).GetString(bytes, 2, bytes.Length - 2); }
+                catch { return null; }
+            }
+
+            // UTF-16 BE BOM: FE FF
+            if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            {
+                try { return new UnicodeEncoding(true, true, true).GetString(bytes, 2, bytes.Length - 2); }
+                catch { return null; }
+            }
+
+            // UTF-32 BE BOM: 00 00 FE FF
             if (bytes.Length >= 4 && bytes[0] == 0x00 && bytes[1] == 0x00 && bytes[2] == 0xFE && bytes[3] == 0xFF)
             {
-                try
-                {
-                    return new UTF32Encoding(true, true, true).GetString(bytes, 4, bytes.Length - 4);
-                }
-                catch
-                {
-                    return null;
-                }
+                try { return new UTF32Encoding(true, true, true).GetString(bytes, 4, bytes.Length - 4); }
+                catch { return null; }
             }
 
             return null;

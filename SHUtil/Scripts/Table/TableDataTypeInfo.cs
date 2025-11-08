@@ -12,12 +12,6 @@
 //
 //////////////////////////////////////////////////////////////////////////
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
 namespace SHUtil.Table
 {
     public interface ITableDataTypeInfo
@@ -36,16 +30,7 @@ namespace SHUtil.Table
 
     public static class TableDataTypeInfoUtil
     {
-        public static XMLTableDataTypeInfo DefaultXMLInfo { get; private set; }
-        public static JsonTableDataTypeInfo DefaultJsonInfo { get; private set; }
-
-        static TableDataTypeInfoUtil()
-        {
-            DefaultXMLInfo = new XMLTableDataTypeInfo();
-            DefaultXMLInfo.DataRowName = "Row";
-            DefaultXMLInfo.DataRootName = "DataList";
-
-            DefaultJsonInfo = new JsonTableDataTypeInfo();
-        }
+        public static XMLTableDataTypeInfo  DefaultXMLInfo  { get; } = new XMLTableDataTypeInfo  { DataRootName = "DataList", DataRowName = "Row" };
+        public static JsonTableDataTypeInfo DefaultJsonInfo { get; } = new JsonTableDataTypeInfo();
     }
 }

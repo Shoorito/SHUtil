@@ -18,10 +18,10 @@ namespace SHUtil
 {
     public class XmlSelector
     {
-        public XmlNode m_XMLNode;
-        public XmlReader m_XMLReader;
-        public XmlBinary m_XMLBinary;
-        public XmlBinary.Node m_XMLBinaryCurrNode;
+        public XmlNode m_XMLNode { get; set; }
+        public XmlReader m_XMLReader { get; set; }
+        public XmlBinary m_XMLBinary { get; set; }
+        public XmlBinary.Node m_XMLBinaryCurrNode { get; set; }
 
         public int AttributeCount
         {

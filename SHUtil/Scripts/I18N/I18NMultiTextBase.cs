@@ -1,54 +1,43 @@
-﻿//////////////////////////////////////////////////////////////////////////
-//
-// I18NMultiTextBase
-// 
-// Created by Shoori.
-//
-// Copyright 2024-2025 SongMyeongWon.
-// All rights reserved
-//
-//////////////////////////////////////////////////////////////////////////
-// Version 1.0
-//
-//////////////////////////////////////////////////////////////////////////
-
 using System;
-using System.Globalization;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace SHUtil.I18N
 {
-    public abstract class I18NMultiTextBase<T>
+    public abstract class I18NMultiTextBase
     {
         public class I18NTextInfo
         {
-            public RegionInfo region_info;
-            public Dictionary<string, string> dic_values = new Dictionary<string, string>();
+            public RegionInfo Region { get; }
+            public Dictionary<string, string> Texts { get; } = new Dictionary<string, string>();
+
+            public I18NTextInfo(RegionInfo region)
+            {
+                Region = region;
+            }
         }
 
-        public Dictionary<string, I18NTextInfo> LanguageTexts => mLanguageTexts;
+        public IReadOnlyDictionary<string, I18NTextInfo> LanguageTexts => mLanguageTexts;
         protected Dictionary<string, I18NTextInfo> mLanguageTexts = new Dictionary<string, I18NTextInfo>();
 
         //----------------------------------------------------------------------------------
         public virtual void ClearTexts()
         {
-            foreach (var regionInfo in mLanguageTexts)
-            {
-                regionInfo.Value.dic_values.Clear();
-            }
+            foreach (var info in mLanguageTexts.Values)
+                info.Texts.Clear();
 
             mLanguageTexts.Clear();
         }
 
         //----------------------------------------------------------------------------------
-        protected void AddText(string regionCode, Dictionary<string, string> dicData)
+        protected void AddText(string regionCode, Dictionary<string, string> data)
         {
-            if (string.IsNullOrEmpty(regionCode) || dicData == null || dicData.Count <= 0)
+            if (string.IsNullOrEmpty(regionCode) || data == null || data.Count == 0)
                 return;
 
-            if (mLanguageTexts.TryGetValue(regionCode, out var regionData) == false)
+            if (!mLanguageTexts.TryGetValue(regionCode, out var regionData))
             {
-                RegionInfo regionInfo = null;
+                RegionInfo regionInfo;
                 try
                 {
                     regionInfo = new RegionInfo(regionCode);
@@ -59,57 +48,49 @@ namespace SHUtil.I18N
                     return;
                 }
 
-                regionData = new I18NTextInfo();
-                regionData.region_info = regionInfo;
+                regionData = new I18NTextInfo(regionInfo);
                 mLanguageTexts.Add(regionCode, regionData);
             }
 
-            foreach (var kvpData in dicData)
+            foreach (var kv in data)
             {
-                if (regionData.dic_values.ContainsKey(kvpData.Key) == false)
-                    regionData.dic_values.Add(kvpData.Key, kvpData.Value);
+                if (!regionData.Texts.ContainsKey(kv.Key))
+                    regionData.Texts.Add(kv.Key, kv.Value);
             }
         }
 
         //----------------------------------------------------------------------------------
+        /// <summary>
+        /// regionCode 지역의 textId 텍스트를 반환합니다. 찾지 못하면 textId를 그대로 반환합니다.
+        /// </summary>
         public string GetLanguageText(string regionCode, string textId)
         {
-            if (mLanguageTexts.TryGetValue(regionCode, out var regionData) == false)
+            if (!mLanguageTexts.TryGetValue(regionCode, out var regionData))
                 return textId;
 
-            if (regionData.dic_values.TryGetValue(textId, out var getText))
-                return getText;
-
-            return textId;
+            return regionData.Texts.TryGetValue(textId, out var text) ? text : textId;
         }
 
         //----------------------------------------------------------------------------------
         public I18NTextInfo GetLanguageInfo(string regionCode)
         {
-            if (mLanguageTexts.TryGetValue(regionCode, out var regionData))
-                return regionData;
-
-            return null;
+            mLanguageTexts.TryGetValue(regionCode, out var regionData);
+            return regionData;
         }
 
         //----------------------------------------------------------------------------------
-        public bool ContainRegion(string regionCode)
-        {
-            return mLanguageTexts.ContainsKey(regionCode);
-        }
+        public bool ContainRegion(string regionCode) => mLanguageTexts.ContainsKey(regionCode);
 
         //----------------------------------------------------------------------------------
         public bool ContainText(string textId, string checkRegion = "")
         {
-            foreach (var kvpRegion in mLanguageTexts)
+            foreach (var kv in mLanguageTexts)
             {
-                if (string.IsNullOrEmpty(checkRegion) == false && checkRegion != kvpRegion.Value.region_info.TwoLetterISORegionName)
+                if (!string.IsNullOrEmpty(checkRegion) && checkRegion != kv.Value.Region.TwoLetterISORegionName)
                     continue;
 
-                if (kvpRegion.Value.dic_values.ContainsKey(textId) == false)
-                    continue;
-
-                return true;
+                if (kv.Value.Texts.ContainsKey(textId))
+                    return true;
             }
 
             return false;

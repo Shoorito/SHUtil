@@ -12,7 +12,6 @@
 //
 //////////////////////////////////////////////////////////////////////////
 
-using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
 using System.IO;
@@ -24,8 +23,8 @@ namespace SHUtil
     {
         public class Node
         {
-            private Dictionary<string, string> mKeyValueAttributes;
             private Dictionary<short, string> mFieldDic;
+            private Dictionary<string, string> mKeyValueAttributes;
 
             public string Identity { get; private set; }
             public int AttributeCount => mKeyValueAttributes.Count;
@@ -47,11 +46,12 @@ namespace SHUtil
                 {
                     string key = "";
                     string value = "";
+
                     if (Identity == "Row")
                     {
                         short key_idx = reader.ReadInt16();
-                        if (row_field_dic != null && row_field_dic.ContainsKey(key_idx) == true)
-                            key = row_field_dic[key_idx];
+                        if (row_field_dic != null && row_field_dic.TryGetValue(key_idx, out var fieldName))
+                            key = fieldName;
 
                         value = reader.ReadString();
                     }
@@ -61,18 +61,8 @@ namespace SHUtil
                         value = reader.ReadString();
                     }
 
-                    if (string.IsNullOrEmpty(key) == true)
-                    {
-
-                    }
-                    else if (mKeyValueAttributes.ContainsKey(key) == true)
-                    {
-
-                    }
-                    else
-                    {
+                    if (!string.IsNullOrEmpty(key) && !mKeyValueAttributes.ContainsKey(key))
                         mKeyValueAttributes.Add(key, value);
-                    }
                 }
 
                 if (Identity == "DataList")
@@ -84,7 +74,7 @@ namespace SHUtil
                     {
                         short field_key = reader.ReadInt16();
                         string field_value = reader.ReadString();
-                        if (field_key > 0 && string.IsNullOrEmpty(field_value) == false && mFieldDic.ContainsKey(field_key) == false)
+                        if (field_key > 0 && !string.IsNullOrEmpty(field_value) && !mFieldDic.ContainsKey(field_key))
                             mFieldDic.Add(field_key, field_value);
                     }
                 }
@@ -93,8 +83,7 @@ namespace SHUtil
             //----------------------------------------------------------------------------------
             public string GetAttribute(string key)
             {
-                string ret;
-                if (mKeyValueAttributes.TryGetValue(key, out ret) == true)
+                if (mKeyValueAttributes.TryGetValue(key, out var ret))
                     return ret;
 
                 return "";
@@ -109,7 +98,7 @@ namespace SHUtil
             //----------------------------------------------------------------------------------
             public string DebugInfo()
             {
-                StringBuilder sb = new StringBuilder();
+                var sb = new StringBuilder();
                 sb.AppendLine(Identity);
 
                 foreach (KeyValuePair<string, string> kvp in mKeyValueAttributes)
@@ -121,8 +110,8 @@ namespace SHUtil
             }
         }
 
-        public XmlBinary.Node Header { get; private set; }
-        public List<XmlBinary.Node> RowList { get; private set; }
+        public Node Header { get; private set; }
+        public List<Node> RowList { get; private set; }
 
         public static string CurrentFilePath = "";
 
@@ -189,62 +178,33 @@ namespace SHUtil
         {
             CurrentFilePath = file_path;
 
-            byte[] source_bytes = null;
-            BinaryReader br = null;
-            if (is_encrypted == true && string.IsNullOrEmpty(encrypt_key) == false)
+            byte[] sourceBytes = bytes ?? (string.IsNullOrEmpty(file_path) ? null : File.ReadAllBytes(file_path));
+            if (sourceBytes == null)
+                return;
+
+            if (is_encrypted && !string.IsNullOrEmpty(encrypt_key))
             {
-                source_bytes = bytes;
-
-                byte[] decrypt_bytes = null;
-                if (source_bytes == null)
-                    source_bytes = File.ReadAllBytes(file_path);
-
-                MemoryStream input_stream = new MemoryStream();
-                if (input_stream != null)
-                {
-                    DESCryptoServiceProvider provider = new DESCryptoServiceProvider();
-                    provider.Key = Encoding.ASCII.GetBytes(encrypt_key);
-                    provider.IV = Encoding.ASCII.GetBytes(encrypt_key);
-
-                    CryptoStream crypto_stream = new CryptoStream(input_stream, provider.CreateDecryptor(), CryptoStreamMode.Write);
-                    if (crypto_stream != null)
-                    {
-                        crypto_stream.Write(source_bytes, 0, source_bytes.Length);
-                        crypto_stream.FlushFinalBlock();
-                        decrypt_bytes = input_stream.ToArray();
-                    }
-                }
-
-                br = new BinaryReader(new MemoryStream(decrypt_bytes));
-                if (br != null)
-                {
-                    Load(br, header_only);
+                sourceBytes = FileUtil.DecryptWithBytes(sourceBytes, encrypt_key);
+                if (sourceBytes == null)
                     return;
-                }
             }
 
-            if (bytes != null)
-                source_bytes = bytes;
-            else
-                source_bytes = File.ReadAllBytes(file_path);
-
-            br = new BinaryReader(new MemoryStream(source_bytes));
-            if (br != null)
+            using (var br = new BinaryReader(new MemoryStream(sourceBytes)))
                 Load(br, header_only);
         }
 
         //----------------------------------------------------------------------------------
         private void Load(BinaryReader reader, bool header_only)
         {
-            Header = new XmlBinary.Node("DataList", reader, null);
+            Header = new Node("DataList", reader, null);
             int row = reader.ReadInt32();
-            if (header_only == false)
+            if (!header_only)
             {
                 Dictionary<short, string> row_field_dic = Header.FieldDic;
-                RowList = new List<XmlBinary.Node>();
+                RowList = new List<Node>();
                 for (int i = 0; i < row; i++)
                 {
-                    RowList.Add(new XmlBinary.Node("Row", reader, row_field_dic, i));
+                    RowList.Add(new Node("Row", reader, row_field_dic, i));
                 }
             }
         }
@@ -252,9 +212,9 @@ namespace SHUtil
         //----------------------------------------------------------------------------------
         public string DebugInfo()
         {
-            StringBuilder sb = new StringBuilder();
+            var sb = new StringBuilder();
             sb.AppendLine(Header.DebugInfo());
-            foreach (XmlBinary.Node row in RowList)
+            foreach (Node row in RowList)
             {
                 sb.AppendLine(row.DebugInfo());
             }

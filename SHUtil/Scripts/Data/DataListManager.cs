@@ -28,7 +28,7 @@ namespace SHUtil.Data
         //----------------------------------------------------------------------------------
         public void Init(string dataRootPath)
         {
-            if (PathUtil.IsValidPath(dataRootPath) == false)
+            if (!PathUtil.IsValidPath(dataRootPath))
                 return;
 
             mDataRootPath = dataRootPath;
@@ -37,7 +37,7 @@ namespace SHUtil.Data
         //----------------------------------------------------------------------------------
         public void Load<T>(TableOwnerBase<T> table, string fileExtension, bool loadAsync = false, string encryptPassword = "") where T : TableInfoBase, new()
         {
-            if (table == null || PathUtil.IsValidPath(mDataRootPath) == false)
+            if (table == null || !PathUtil.IsValidPath(mDataRootPath))
                 return;
 
             string loadPath = Path.Combine(mDataRootPath, $"{table.FileName}.{fileExtension}");
@@ -46,7 +46,7 @@ namespace SHUtil.Data
             else
                 table.LoadData(loadPath, encryptPassword);
 
-            if (mRegisteredTables.ContainsKey(table.GetType()) == false)
+            if (!mRegisteredTables.ContainsKey(table.GetType()))
                 mRegisteredTables.Add(table.GetType(), table);
         }
 
@@ -60,16 +60,13 @@ namespace SHUtil.Data
         }
 
         //----------------------------------------------------------------------------------
-        public override void DIsposeSingleton()
+        public override void DisposeSingleton()
         {
             foreach (var table in mRegisteredTables.Values)
-            {
                 table.Dispose();
-            }
 
             mRegisteredTables.Clear();
-
-            base.DIsposeSingleton();
+            base.DisposeSingleton();
         }
 
         //----------------------------------------------------------------------------------

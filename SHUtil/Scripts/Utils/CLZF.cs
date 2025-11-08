@@ -1,294 +1,231 @@
-﻿//////////////////////////////////////////////////////////////////////////
-//
-// CLZF
-// 
-// Created by Shoori.
-//
-// Copyright 2024-2025 SongMyeongWon.
-// All rights reserved
-//
-//////////////////////////////////////////////////////////////////////////
-// Version 1.0
-//
-//////////////////////////////////////////////////////////////////////////
-
 using System;
 
 namespace SHUtil
 {
+    /// <summary>
+    /// LZF 알고리즘 기반 데이터 압축/해제 유틸리티입니다.
+    /// </summary>
     public static class CLZF
     {
-        private static readonly long[] HashTable = new long[HSIZE];
+        private const int HLOG    = 16;
+        private const int HSIZE   = 1 << HLOG;  // 65536
+        private const int MAX_LIT = 1 << 5;     // 32
+        private const int MAX_OFF = 1 << 13;    // 8192
+        private const int MAX_REF = (1 << 8) + (1 << 3); // 264
 
-        private const uint HLOG = 14U;
-        private const uint HSIZE = 16384U;
-        private const uint MAX_LIT = 32U;
-        private const uint MAX_OFF = 8192U;
-        private const uint MAX_REF = 264U;
+        [ThreadStatic]
+        private static long[] sHashTable;
 
-        //----------------------------------------------------------------------------------
-        public static byte[] Compress(byte[] input_bytes)
+        private static long[] HashTable
         {
-            int output_byte_count_guess = input_bytes.Length * 2;
-            byte[] tmp_buffer = new byte[output_byte_count_guess];
-
-            int byte_count = LZFCompress(input_bytes, ref tmp_buffer);
-            while (byte_count == 0)
+            get
             {
-                output_byte_count_guess *= 2;
-                tmp_buffer = new byte[output_byte_count_guess];
-                byte_count = LZFCompress(input_bytes, ref tmp_buffer);
+                if (sHashTable == null)
+                    sHashTable = new long[HSIZE];
+                return sHashTable;
             }
-
-            byte[] output_bytes = new byte[byte_count];
-            Buffer.BlockCopy(tmp_buffer, 0, output_bytes, 0, byte_count);
-            return output_bytes;
         }
 
         //----------------------------------------------------------------------------------
-        public static byte[] Decompress(byte[] input_bytes)
+        /// <summary>
+        /// 바이트 배열을 LZF 알고리즘으로 압축합니다.
+        /// </summary>
+        public static byte[] Compress(byte[] input)
         {
-            int output_byte_count_guess = input_bytes.Length * 2;
-            byte[] tmp_buffer = new byte[output_byte_count_guess];
+            if (input == null)
+                throw new ArgumentNullException(nameof(input));
 
-            int byte_count = LZFDecompress(input_bytes, ref tmp_buffer);
-            while (byte_count == 0)
-            {
-                output_byte_count_guess *= 2;
-                tmp_buffer = new byte[output_byte_count_guess];
-                byte_count = LZFDecompress(input_bytes, ref tmp_buffer);
-            }
+            if (input.Length == 0)
+                return Array.Empty<byte>();
 
-            byte[] output_bytes = new byte[byte_count];
-            Buffer.BlockCopy(tmp_buffer, 0, output_bytes, 0, byte_count);
-            return output_bytes;
+            byte[] output = new byte[Math.Max(input.Length * 2, 64)];
+            int    length = LZFCompress(input, ref output);
+
+            byte[] result = new byte[length];
+            Buffer.BlockCopy(output, 0, result, 0, length);
+            return result;
         }
 
         //----------------------------------------------------------------------------------
-        public static int LZFCompress(byte[] input, ref byte[] output)
+        /// <summary>
+        /// LZF 압축된 바이트 배열을 원본으로 해제합니다.
+        /// </summary>
+        public static byte[] Decompress(byte[] input)
         {
-            int input_len = input.Length;
-            int output_len = output.Length;
+            if (input == null)
+                throw new ArgumentNullException(nameof(input));
 
-            Array.Clear(HashTable, 0, (int)HSIZE);
+            if (input.Length == 0)
+                return Array.Empty<byte>();
 
-            uint input_idx = 0U;
-            uint output_idx = 0U;
-            uint h_val = (uint)((int)input[(int)input_idx] << 8 | (int)input[(int)(input_idx + 1U)]);
+            byte[] output = new byte[Math.Max(input.Length * 2, 64)];
+            int    length = LZFDecompress(input, ref output);
 
-            int lit = 0;
-            bool now_compress = true;
-            while (now_compress == true)
+            byte[] result = new byte[length];
+            Buffer.BlockCopy(output, 0, result, 0, length);
+            return result;
+        }
+
+        //----------------------------------------------------------------------------------
+        private static int LZFCompress(byte[] input, ref byte[] output)
+        {
+            long[] hashTable = HashTable;
+            Array.Clear(hashTable, 0, hashTable.Length);
+
+            int iLen = input.Length;
+            int oLen = output.Length;
+            int ip   = 0;
+            int op   = 0;
+            int lit  = 0;
+
+            for (;;)
             {
-                if ((ulong)input_idx < (ulong)((long)(input_len - 2)))
+                if (ip < iLen - 2)
                 {
-                    h_val = (h_val << 8 | (uint)input[(int)(input_idx + 2U)]);
+                    int hval  = (input[ip] << 8) | input[ip + 1];
+                    int hslot = (((hval ^ (hval << 5)) >> (3 * 8 - HLOG)) - input[ip + 2] * 5) & (HSIZE - 1);
 
-                    long hslot = (long)((ulong)(h_val ^ h_val << 5) >> (int)(24U - HLOG - h_val * 5U) & HSIZE - 1U);
-                    long refer = HashTable[(int)(checked((IntPtr)hslot))];
-                    HashTable[(int)(checked((IntPtr)hslot))] = (long)((ulong)input_idx);
+                    int reference = (int)hashTable[hslot];
+                    hashTable[hslot] = ip;
 
-                    long offset = (long)((ulong)input_idx - (ulong)refer - 1UL);
-                    if ((offset < (long)((ulong)MAX_OFF)) &&
-                        ((ulong)(input_idx + 4U) < (ulong)((long)input_len)) &&
-                        refer > 0L &&
-                        input[(int)(checked((IntPtr)refer))] == input[(int)input_idx] &&
-                        input[(int)(checked((IntPtr)(unchecked(refer + 1L))))] == input[(int)(input_idx + 1U)] &&
-                        input[(int)(checked((IntPtr)(unchecked(refer + 2L))))] == input[(int)(input_idx + 2U)])
+                    int off = ip - reference - 1;
+
+                    if (off >= 0
+                        && off < MAX_OFF
+                        && ip + 4 < iLen
+                        && reference + 4 < iLen
+                        && input[reference]     == input[ip]
+                        && input[reference + 1] == input[ip + 1]
+                        && input[reference + 2] == input[ip + 2])
                     {
-                        uint len = 2U;
-                        uint max_len = (uint)input_len - input_idx - len;
+                        int maxLen = Math.Min(Math.Min(iLen - ip, iLen - reference), MAX_REF);
+                        int len    = 3;
 
-                        max_len = max_len > MAX_REF ? MAX_REF : max_len;
+                        while (len < maxLen && input[reference + len] == input[ip + len])
+                            len++;
 
-                        ulong checker = (ulong)output_idx + (ulong)((long)lit) + 4UL;
-                        if (checker >= (ulong)((long)output_len))
-                        {
-                            now_compress = false;
-                            continue;
-                        }
-
-                        len += 1U;
-                        while (len < max_len && input[(int)(checked((IntPtr)(unchecked(refer + (long)((ulong)len)))))] == input[(int)(input_idx + len)])
-                        {
-                            len += 1U;
-                        }
-
+                        // 대기 중인 리터럴 먼저 출력
                         if (lit != 0)
                         {
-                            output[(int)output_idx] = (byte)(lit - 1);
-                            output_idx += 1U;
-                            lit = -lit;
+                            if (op + lit + 1 >= oLen)
+                                oLen = GrowOutput(ref output, op + lit + 2);
 
-                            output[(int)output_idx] = input[(int)(checked((IntPtr)(unchecked((ulong)input_idx + (ulong)((long)lit)))))];
-                            output_idx += 1U;
-                            lit += 1;
-                            while (lit != 0)
-                            {
-                                output[(int)output_idx] = input[(int)(checked((IntPtr)(unchecked((ulong)input_idx + (ulong)((long)lit)))))];
-                                output_idx += 1U;
-                                lit += 1;
-                            }
+                            output[op++] = (byte)(lit - 1);
+                            Buffer.BlockCopy(input, ip - lit, output, op, lit);
+                            op  += lit;
+                            lit  = 0;
                         }
 
-                        len -= 2U;
-                        input_idx += 1U;
-                        if (len < 7U)
+                        // 역참조 출력
+                        len -= 2;
+
+                        if (op + 3 >= oLen)
+                            oLen = GrowOutput(ref output, op + 4);
+
+                        if (len < 7)
                         {
-                            output[(int)output_idx] = (byte)((offset >> 8) + (long)((ulong)((ulong)len << 5)));
-                            output_idx += 1;
+                            output[op++] = (byte)((len << 5) | (off >> 8));
                         }
                         else
                         {
-                            output[(int)output_idx] = (byte)((offset >> 8) + 224L);
-                            output_idx += 1U;
-                            output[(int)output_idx] = (byte)(len - 7U);
-                            output_idx += 1U;
+                            output[op++] = (byte)((7 << 5) | (off >> 8));
+                            output[op++] = (byte)(len - 7);
                         }
+                        output[op++] = (byte)off;
 
-                        output[(int)output_idx] = (byte)offset;
-                        output_idx += 1U;
-                        input_idx += len - 1U;
-
-                        h_val = (uint)((int)input[(int)input_idx] << 8 | (int)input[(int)(input_idx + 1U)]);
-                        h_val = (h_val << 8 | (uint)input[(int)(input_idx + 2U)]);
-                        HashTable[(int)((h_val ^ h_val << 5) >> (int)(24U - HLOG - h_val * 5U) & HSIZE - 1U)] = (long)((ulong)input_idx);
-
-                        input_idx += 1U;
-                        h_val = (h_val << 8 | (uint)input[(int)(input_idx + 2U)]);
-                        HashTable[(int)((h_val ^ h_val << 5) >> (int)(24U - HLOG - h_val * 5U) & HSIZE - 1U)] = (long)((ulong)input_idx);
-
-                        input_idx += 1U;
+                        ip += len + 2;
                         continue;
                     }
                 }
-                else if ((ulong)input_idx == (ulong)((long)input_len))
+                else if (ip == iLen)
                 {
-                    if (lit != 0)
-                    {
-                        if ((ulong)output_idx + (ulong)((long)lit) + 1UL >= (ulong)((long)output_len))
-                            return 0;
-
-                        output[(int)output_idx] = (byte)(lit - 1);
-                        output_idx += 1U;
-                        lit = -lit;
-
-                        output[(int)output_idx] = input[(int)(checked((IntPtr)(unchecked((ulong)input_idx + (ulong)((long)lit)))))];
-                        output_idx += 1U;
-                        lit += 1;
-                        while (lit != 0)
-                        {
-                            output[(int)output_idx] = input[(int)(checked((IntPtr)(unchecked((ulong)input_idx + (ulong)((long)lit)))))];
-                            output_idx += 1U;
-                            lit += 1;
-                        }
-                    }
-
-                    return (int)output_idx;
+                    break;
                 }
 
-                lit += 1;
-                input_idx += 1U;
-                if ((long)lit == (long)((ulong)MAX_LIT))
+                // 리터럴 누적
+                lit++;
+                ip++;
+
+                if (lit == MAX_LIT)
                 {
-                    if ((ulong)(output_idx + 1U + MAX_LIT) >= (ulong)((long)output_len))
-                        return 0;
+                    if (op + MAX_LIT + 1 >= oLen)
+                        oLen = GrowOutput(ref output, op + MAX_LIT + 2);
 
-                    output[(int)output_idx] = (byte)(MAX_LIT - 1U);
-                    output_idx += 1U;
-                    lit = -lit;
-
-                    output[(int)output_idx] = input[(int)(checked((IntPtr)(unchecked((ulong)input_idx + (ulong)((long)lit)))))];
-                    output_idx += 1U;
-                    lit += 1;
-                    while (lit != 0)
-                    {
-                        output[(int)output_idx] = input[(int)(checked((IntPtr)(unchecked((ulong)input_idx + (ulong)((long)lit)))))];
-                        output_idx += 1U;
-                        lit += 1;
-                    }
+                    output[op++] = (byte)(MAX_LIT - 1);
+                    Buffer.BlockCopy(input, ip - lit, output, op, lit);
+                    op  += lit;
+                    lit  = 0;
                 }
             }
 
-            return 0;
+            // 남은 리터럴 출력
+            if (lit != 0)
+            {
+                if (op + lit + 1 >= oLen)
+                    oLen = GrowOutput(ref output, op + lit + 2);
+
+                output[op++] = (byte)(lit - 1);
+                Buffer.BlockCopy(input, ip - lit, output, op, lit);
+                op += lit;
+            }
+
+            return op;
         }
 
         //----------------------------------------------------------------------------------
-        public static int LZFDecompress(byte[] input, ref byte[] output)
+        private static int LZFDecompress(byte[] input, ref byte[] output)
         {
-            int input_len = input.Length;
-            int output_len = output.Length;
-            uint input_idx = 0U;
-            uint output_idx = 0U;
+            int iLen = input.Length;
+            int oLen = output.Length;
+            int ip   = 0;
+            int op   = 0;
 
-            bool now_decompress = true;
-            while (now_decompress == true)
+            while (ip < iLen)
             {
-                uint ctrl = (uint)input[(int)input_idx];
-                input_idx += 1U;
+                int ctrl = input[ip++];
 
-                if (ctrl < 32U)
+                if (ctrl < MAX_LIT)
                 {
-                    ctrl += 1U;
-                    if ((ulong)(output_idx + ctrl) > (ulong)((long)output_len))
-                    {
-                        now_decompress = false;
-                        continue;
-                    }
+                    // 리터럴 블록
+                    ctrl++;
+                    if (op + ctrl >= oLen)
+                        oLen = GrowOutput(ref output, op + ctrl + 1);
 
-                    output[(int)output_idx] = input[(int)input_idx];
-                    output_idx += 1U;
-                    input_idx += 1U;
-                    ctrl -= 1U;
-                    while (ctrl != 0)
-                    {
-                        output[(int)output_idx] = input[(int)input_idx];
-                        output_idx += 1U;
-                        input_idx += 1U;
-                        ctrl -= 1U;
-                    }
+                    Buffer.BlockCopy(input, ip, output, op, ctrl);
+                    ip += ctrl;
+                    op += ctrl;
                 }
                 else
                 {
-                    uint len = ctrl >> 5;
-                    int refer = (int)(output_idx - ((ctrl & 31U) << 8) - 1U);
-                    if (len == 7U)
-                    {
-                        len += (uint)input[(int)input_idx];
-                        input_idx += 1U;
-                    }
+                    // 역참조 블록
+                    int len    = ctrl >> 5;
+                    int refPos = op - ((ctrl & 0x1f) << 8) - 1;
 
-                    refer -= (int)input[(int)input_idx];
-                    input_idx += 1U;
+                    if (len == 7)
+                        len += input[ip++];
 
-                    if ((ulong)(output_idx + len + 2U) > (ulong)((long)output_len))
-                        return 0;
+                    len    += 2;
+                    refPos -= input[ip++];
 
-                    if (refer < 0)
-                        return 0;
+                    if (refPos < 0)
+                        throw new InvalidOperationException("CLZF 압축 해제 실패: 잘못된 참조 위치입니다.");
 
-                    for (int i = 0; i < 3; i++)
-                    {
-                        output[(int)output_idx] = output[refer];
-                        output_idx += 1U;
-                        refer += 1;
-                    }
+                    if (op + len >= oLen)
+                        oLen = GrowOutput(ref output, op + len + 1);
 
-                    len -= 1;
-                    while (len != 0U)
-                    {
-                        output[(int)output_idx] = output[refer];
-                        output_idx += 1U;
-                        refer += 1;
-                        len -= 1;
-                    }
+                    do { output[op++] = output[refPos++]; } while (--len != 0);
                 }
-
-                if ((ulong)input_idx >= (ulong)((long)input_len))
-                    return (int)output_idx;
             }
 
-            return 0;
+            return op;
+        }
+
+        //----------------------------------------------------------------------------------
+        private static int GrowOutput(ref byte[] output, int minSize)
+        {
+            int newSize = Math.Max(output.Length * 2, minSize + 64);
+            Array.Resize(ref output, newSize);
+            return newSize;
         }
     }
 }

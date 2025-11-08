@@ -23,32 +23,31 @@ namespace SHUtil
     public static class PathUtil
     {
         /// <summary>
-        /// 입력한 파일 경로가 올바른 경로 형태인지 체크합니다
+        /// 입력한 경로가 올바른 형태인지 체크합니다.
         /// </summary>
-        /// <param name="url"></param>
+        /// <param name="path">검사할 경로</param>
+        /// <param name="checkExist">true이면 경로가 실제로 존재하는지도 확인합니다.</param>
         //----------------------------------------------------------------------------------
         public static bool IsValidPath(string path, bool checkExist = false)
         {
-            if (string.IsNullOrEmpty(path) || string.IsNullOrWhiteSpace(path))
+            if (string.IsNullOrWhiteSpace(path))
                 return false;
 
-            // Check IsValidPathString?
             char[] invalidChars = Path.GetInvalidPathChars();
-            if (invalidChars == null || invalidChars.Length <= 0 || path.Any(c => invalidChars.Contains(c) || char.IsControl(c)))
+            if (path.Any(c => invalidChars.Contains(c) || char.IsControl(c)))
                 return false;
 
-            // Check IsValidPath?
             try
             {
                 string rootPath = Path.GetPathRoot(path);
-                if (string.IsNullOrEmpty(rootPath) || string.IsNullOrWhiteSpace(rootPath))
+                if (string.IsNullOrWhiteSpace(rootPath))
                     return false;
 
                 string fullPath = Path.GetFullPath(path);
-                if (string.IsNullOrEmpty(fullPath) || string.IsNullOrWhiteSpace(fullPath))
+                if (string.IsNullOrWhiteSpace(fullPath))
                     return false;
 
-                if (checkExist && File.Exists(fullPath) == false && Directory.Exists(fullPath) == false)
+                if (checkExist && !File.Exists(fullPath) && !Directory.Exists(fullPath))
                     return false;
             }
             catch (Exception e)
@@ -67,16 +66,16 @@ namespace SHUtil
         //----------------------------------------------------------------------------------
         public static bool IsValidWebURL(string url)
         {
-            if (string.IsNullOrEmpty(url) || string.IsNullOrWhiteSpace(url))
+            if (string.IsNullOrWhiteSpace(url))
                 return false;
 
-            if (Uri.TryCreate(url, UriKind.Absolute, out var result) == false)
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var result))
                 return false;
 
             if (result.Scheme != Uri.UriSchemeHttp && result.Scheme != Uri.UriSchemeHttps)
                 return false;
 
-            if (string.IsNullOrEmpty(result.Host) || string.IsNullOrWhiteSpace(result.Host))
+            if (string.IsNullOrWhiteSpace(result.Host))
                 return false;
 
             return true;
@@ -89,7 +88,7 @@ namespace SHUtil
         //----------------------------------------------------------------------------------
         public static async Task<bool> CheckUrlExistsAsync(string url, float timeOutSecond)
         {
-            if (IsValidWebURL(url) == false)
+            if (!IsValidWebURL(url))
                 return false;
 
             try
@@ -109,8 +108,7 @@ namespace SHUtil
             }
             catch (WebException webException)
             {
-                var errorResponse = webException.Response as HttpWebResponse;
-                if (errorResponse != null)
+                if (webException.Response is HttpWebResponse errorResponse)
                 {
                     SHLog.LogError($"[HTTP URL STATUS ERROR] StatusCode: {errorResponse.StatusCode}({(int)errorResponse.StatusCode})");
                     return false;

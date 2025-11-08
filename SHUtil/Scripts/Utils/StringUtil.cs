@@ -1,4 +1,4 @@
-﻿//////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
 //
 // StringUtil
 // 
@@ -12,51 +12,54 @@
 //
 //////////////////////////////////////////////////////////////////////////
 
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
-using System.Collections.Generic;
-using System.Text;
 using System.Linq;
+using System.Text;
 
 namespace SHUtil
 {
+    /// <summary>
+    /// 문자열 파싱, 압축, 분할 등 문자열 관련 편의 기능을 제공합니다.
+    /// </summary>
     public static class StringUtil
     {
+        /// <summary>
+        /// 문자열을 지정한 타입으로 안전하게 변환합니다. 실패 시 기본값을 반환합니다.
+        /// </summary>
         //----------------------------------------------------------------------------------
-        public static ParseType SafeParse<ParseType>(string text, ParseType default_value)
+        public static ParseType SafeParse<ParseType>(string text, ParseType defaultValue)
         {
-            return (ParseType)SafeParse(text, typeof(ParseType), default_value);
+            return (ParseType)SafeParse(text, typeof(ParseType), defaultValue);
         }
 
         //----------------------------------------------------------------------------------
-        public static object SafeParse(string text, System.Type parse_type, object default_value)
+        public static object SafeParse(string text, Type parseType, object defaultValue)
         {
-            if (string.IsNullOrEmpty(text) == true)
-                return default_value;
+            if (string.IsNullOrEmpty(text))
+                return defaultValue;
 
             try
             {
-                if (parse_type.IsEnum == true)
+                if (parseType.IsEnum)
                 {
-                    if (text.Contains("|") == true)
-                        return ParseEnumFlag(text, parse_type);
+                    if (text.Contains("|"))
+                        return ParseEnumFlag(text, parseType);
 
-                    return System.Enum.Parse(parse_type, text, true);
+                    return Enum.Parse(parseType, text, ignoreCase: true);
                 }
-                else
-                {
-                    if (parse_type == typeof(System.Version))
-                        return System.Version.Parse(text);
 
-                    return System.Convert.ChangeType(text, parse_type);
-                }
+                if (parseType == typeof(Version))
+                    return Version.Parse(text);
+
+                return Convert.ChangeType(text, parseType);
             }
-            catch (System.Exception e)
+            catch
             {
-                // TODO: Add Log
+                return defaultValue;
             }
-
-            return default_value;
         }
 
         //----------------------------------------------------------------------------------
@@ -66,146 +69,129 @@ namespace SHUtil
         }
 
         //----------------------------------------------------------------------------------
-        public static object ParseEnumFlag(string value, System.Type parse_type)
+        public static object ParseEnumFlag(string value, Type parseType)
         {
-            System.TypeCode type_code = System.Type.GetTypeCode(parse_type);
-            List<object> split_obj_list = value.Split('|').Select(s => System.Enum.Parse(parse_type, s)).ToList<object>();
-            int split_obj_count = split_obj_list.Count;
+            var typeCode = Type.GetTypeCode(parseType);
+            var parts    = value.Split('|').Select(s => Enum.Parse(parseType, s.Trim(), true)).ToList();
 
-            int flag_value = 0;
-            byte flag_value_byte = 0;
-            long flag_value_long = 0L;
-            for (int i = 0; i < split_obj_count; i++)
+            int  flagInt  = 0;
+            long flagLong = 0L;
+            byte flagByte = 0;
+
+            foreach (var part in parts)
             {
-                if (type_code != System.TypeCode.Byte)
+                switch (typeCode)
                 {
-                    if (type_code != System.TypeCode.Int64)
-                        flag_value |= (int)split_obj_list[i];
-                    else
-                        flag_value_long |= (long)split_obj_list[i];
-                }
-                else
-                {
-                    flag_value_byte |= (byte)split_obj_list[i];
+                    case TypeCode.Byte:  flagByte |= (byte)part; break;
+                    case TypeCode.Int64: flagLong |= (long)part; break;
+                    default:             flagInt  |= (int)part;  break;
                 }
             }
 
-            if (type_code == System.TypeCode.Byte)
-                return flag_value_byte;
-            else if (type_code != System.TypeCode.Int64)
-                return flag_value;
-            else
-                return flag_value_long;
+            switch (typeCode)
+            {
+                case TypeCode.Byte:  return (object)flagByte;
+                case TypeCode.Int64: return (object)flagLong;
+                default:             return (object)flagInt;
+            }
         }
 
+        /// <summary>
+        /// 구분자로 분리된 문자열을 List로 변환합니다. 실패 시 null을 반환합니다.
+        /// </summary>
         //----------------------------------------------------------------------------------
-        public static List<T> SafeParseToList<T>(string parse_value, params char[] separator)
+        public static List<T> SafeParseToList<T>(string parseValue, params char[] separator)
         {
-            if (string.IsNullOrEmpty(parse_value) == true)
+            if (string.IsNullOrEmpty(parseValue))
                 return null;
 
             try
             {
-                if (typeof(T).IsEnum == true)
-                    return parse_value.Split(separator).Select(s => (T)System.Enum.Parse(typeof(T), s)).ToList<T>();
+                if (typeof(T).IsEnum)
+                    return parseValue.Split(separator).Select(s => (T)Enum.Parse(typeof(T), s.Trim(), true)).ToList();
 
-                return parse_value.Split(separator).Select(s => (T)System.Convert.ChangeType(s, typeof(T))).ToList<T>();
-
+                return parseValue.Split(separator).Select(s => (T)Convert.ChangeType(s.Trim(), typeof(T))).ToList();
             }
-            catch (System.Exception e)
+            catch
             {
-                // TODO: Add Log
+                return null;
             }
-
-            return null;
         }
 
+        /// <summary>
+        /// 문자열을 LZF 또는 GZip으로 압축 후 Base64 문자열로 반환합니다.
+        /// </summary>
         //----------------------------------------------------------------------------------
-        public static string CompressedBase64String(string xml_str, bool use_clzf)
+        public static string CompressToBase64(string text, bool useClzf)
         {
-            string ret_string = "";
-            if (use_clzf == true)
-            {
-                try
-                {
-                    byte[] text_bytes = Encoding.UTF8.GetBytes(xml_str);
-                    byte[] compressed = CLZF.Compress(text_bytes);
-                    return System.Convert.ToBase64String(compressed);
+            if (string.IsNullOrEmpty(text))
+                return string.Empty;
 
-                }
-                catch (System.Exception e)
-                {
-                    // TODO: Add Log
-                    return ret_string;
-                }
-            }
-
-            MemoryStream stream = null;
             try
             {
-                stream = new MemoryStream();
+                var inputBytes = Encoding.UTF8.GetBytes(text);
+                byte[] compressed;
 
-                byte[] buffer = Encoding.UTF8.GetBytes(xml_str);
-                GZipStream gzip = new GZipStream(stream, CompressionMode.Compress, true);
-                if (gzip != null)
-                    gzip.Write(buffer, 0, buffer.Length);
-
-                stream.Position = 0L;
-
-                byte[] compressed_data = new byte[stream.Length];
-                stream.Read(compressed_data, 0, compressed_data.Length);
-                ret_string = System.Convert.ToBase64String(compressed_data);
-            }
-            catch (System.Exception e)
-            {
-                // TODO: Add Log
-            }
-            finally
-            {
-                if (stream != null)
+                if (useClzf)
                 {
-                    stream.Close();
-                    stream = null;
+                    compressed = CLZF.Compress(inputBytes);
                 }
-            }
+                else
+                {
+                    using (var ms = new MemoryStream())
+                    {
+                        using (var gzip = new GZipStream(ms, CompressionLevel.Optimal, leaveOpen: true))
+                            gzip.Write(inputBytes, 0, inputBytes.Length);
 
-            return ret_string;
+                        compressed = ms.ToArray();
+                    }
+                }
+
+                return Convert.ToBase64String(compressed);
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
+        /// <summary>문자열을 지정한 길이 단위로 분할합니다.</summary>
         //----------------------------------------------------------------------------------
-        public static List<string> StringSplit(string in_str, int len)
+        public static List<string> StringSplit(string str, int chunkSize)
         {
-            List<string> list = new List<string>();
-            int loop_count = 1;
-            int in_str_len = in_str.Length;
-            if (in_str_len >= len)
-                loop_count = in_str_len / len + 1;
+            var list = new List<string>();
 
-            int offset = 0;
-            int size = System.Math.Min(in_str_len, 25000);
-            for (int i = 0; i < loop_count; i++)
+            if (string.IsNullOrEmpty(str) || chunkSize <= 0)
+                return list;
+
+            for (int offset = 0; offset < str.Length; offset += chunkSize)
             {
-                list.Add(in_str.Substring(offset, size));
-                offset += size;
-                size = System.Math.Min(in_str_len - offset, len);
+                int size = Math.Min(chunkSize, str.Length - offset);
+                list.Add(str.Substring(offset, size));
             }
 
             return list;
         }
 
+        /// <summary>
+        /// 문자열에 영문자·숫자·언더스코어 외의 문자가 포함되어 있으면 true를 반환합니다.
+        /// ignoreChars에 포함된 문자는 특수 문자로 처리하지 않습니다.
+        /// </summary>
         //----------------------------------------------------------------------------------
         public static bool ContainsSpecialOrWildcard(string text, char[] ignoreChars = null)
         {
-            if (string.IsNullOrEmpty(text) || string.IsNullOrWhiteSpace(text))
+            if (string.IsNullOrWhiteSpace(text))
                 return false;
 
             foreach (char ch in text)
             {
-                if (char.IsLetterOrDigit(ch) == false || ch == '_')
-                    return true;
+                if (char.IsLetterOrDigit(ch) || ch == '_')
+                    continue;
 
-                if (ignoreChars != null && ignoreChars.Contains(ch))
-                    return true;
+                if (ignoreChars != null && Array.IndexOf(ignoreChars, ch) >= 0)
+                    continue;
+
+                return true;
             }
 
             return false;
