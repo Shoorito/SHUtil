@@ -4,7 +4,7 @@
 // 
 // Created by Shoori.
 //
-// Copyright 2025 SongMyeongWon.
+// Copyright 2024-2025 SongMyeongWon.
 // All rights reserved
 //
 //////////////////////////////////////////////////////////////////////////

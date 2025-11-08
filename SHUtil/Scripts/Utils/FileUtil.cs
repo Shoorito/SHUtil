@@ -1,4 +1,18 @@
-﻿using System;
+﻿//////////////////////////////////////////////////////////////////////////
+//
+// FileUtil
+// 
+// Created by Shoori.
+//
+// Copyright 2024-2025 SongMyeongWon.
+// All rights reserved
+//
+//////////////////////////////////////////////////////////////////////////
+// Version 1.0
+//
+//////////////////////////////////////////////////////////////////////////
+
+using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -55,14 +69,8 @@ namespace SHUtil
         }
 
         //----------------------------------------------------------------------------------
-        public static byte[] Decrypt(string filePath, string password)
+        public static byte[] DecryptWithBytes(byte[] allBytes, string password)
         {
-            if (PathUtil.IsValidPath(filePath) == false ||
-                string.IsNullOrEmpty(password) ||
-                string.IsNullOrWhiteSpace(password))
-                return null;
-
-            var allBytes = File.ReadAllBytes(filePath);
             if (allBytes.Length < (SALT_SIZE + IV_SIZE + HMAC_SIZE))
                 return null;
 
@@ -97,6 +105,18 @@ namespace SHUtil
 
             var plain = DecryptAesCbc(cipher, enc_key, iv);
             return plain;
+        }
+
+        //----------------------------------------------------------------------------------
+        public static byte[] Decrypt(string filePath, string password)
+        {
+            if (PathUtil.IsValidPath(filePath) == false ||
+                string.IsNullOrEmpty(password) ||
+                string.IsNullOrWhiteSpace(password))
+                return null;
+
+            var allBytes = File.ReadAllBytes(filePath);
+            return DecryptWithBytes(allBytes, password);
         }
 
         //----------------------------------------------------------------------------------

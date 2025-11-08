@@ -12,50 +12,86 @@
 //
 //////////////////////////////////////////////////////////////////////////
 
+using System.Collections.Generic;
+using System.Xml;
+
 namespace SHUtil.Table
 {
+    //----------------------------------------------------------------------------------
+    public abstract class TableInfoJsonBase : TableInfoBase
+    {
+        //----------------------------------------------------------------------------------
+        public override void Load(object data)
+        {
+            var xmlNode = data as Dictionary<string, string>;
+            if (xmlNode != null)
+                Load(xmlNode);
+        }
+
+        //----------------------------------------------------------------------------------
+        public override void LoadAppend(object appendData)
+        {
+            var xmlNode = appendData as Dictionary<string, string>;
+            if (xmlNode != null)
+                LoadAppend(xmlNode);
+        }
+
+        //----------------------------------------------------------------------------------
+        protected abstract void Load(Dictionary<string, string> nodeData);
+        //----------------------------------------------------------------------------------
+        protected abstract void LoadAppend(Dictionary<string, string> nodeData);
+    }
+
+    //----------------------------------------------------------------------------------
+    public abstract class TableInfoXmlBase : TableInfoBase
+    {
+        //----------------------------------------------------------------------------------
+        public override void Load(object data)
+        {
+            var xmlNode = data as XmlNode;
+            if (xmlNode != null)
+                Load(xmlNode);
+        }
+
+        //----------------------------------------------------------------------------------
+        public override void LoadAppend(object appendData)
+        {
+            var xmlNode = appendData as XmlNode;
+            if (xmlNode != null)
+                LoadAppend(xmlNode);
+        }
+
+        //----------------------------------------------------------------------------------
+        protected abstract void Load(XmlNode nodeData);
+        //----------------------------------------------------------------------------------
+        protected abstract void LoadAppend(XmlNode nodeData);
+    }
+
+    //----------------------------------------------------------------------------------
     public abstract class TableInfoBase
     {
-        public int IDN { get; private set; }
-        public string ID { get; private set; }
+        public int Idx { get; private set; }
+        public int Idn { get; private set; }
+        public string Id { get; private set; }
 
-        public virtual bool IsValid
+        //----------------------------------------------------------------------------------
+        public void InitByIdn(int idx, int idn)
         {
-            get
-            {
-                return true;
-            }
+            Idx = idx;
+            Idn = idn;
         }
 
         //----------------------------------------------------------------------------------
-        public abstract void Load(XmlSelector node);
-
-        //----------------------------------------------------------------------------------
-        public abstract void LoadAppend(XmlSelector node);
-
-        //----------------------------------------------------------------------------------
-        public virtual string DebugInfo()
+        public void InitById(int idx, string id)
         {
-            return "";
+            Idx = idx;
+            Id = id;
         }
 
         //----------------------------------------------------------------------------------
-        public void Init(int idn, string id)
-        {
-            IDN = idn;
-            ID = id;
-        }
+        public abstract void Load(object data);
 
-        public const string DEFAULT_PATH_ROOT = "Table";
-        public const string EXPORT_PATH = "Export";
-        public const string EXPORT_PATH_CLIENT = "ClientXML";
-        public const string EXPORT_PATH_XML = "XML";
-        public const string EXPORT_PATH_ENCRYPT = "Encrypt";
-        public const string EXPORT_PATH_BINARY = "Binary";
-        public const string EXPORT_PATH_BINARY_ENCRYPT = "BinaryEncrypt";
-        public const string EXTENSION_XML = ".xml";
-        public const string EXTENSION_XML_ENCRYPT = ".xenc";
-        public const string EXTENSION_XML_BINARY = ".xbin";
-        public const string EXTENSION_XML_BINARY_ENCRYPT = ".xbinenc";
+        //----------------------------------------------------------------------------------
+        public abstract void LoadAppend(object appendData);
     }
 }

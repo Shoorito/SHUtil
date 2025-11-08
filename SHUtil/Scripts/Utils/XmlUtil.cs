@@ -32,6 +32,9 @@ namespace SHUtil
     {
         public static bool DEBUG_BINARY_LOG = false;
 
+        public const string DEFAULT_XML_DATA_ROOT = "DataList";
+        public const string DEFAULT_XML_DATA_ROW = "Row";
+
         //----------------------------------------------------------------------------------
         public static ParseType ParseSingleNode<ParseType>(XmlNode node, string name) where ParseType : class, ISingleNodeClass, new()
         {
