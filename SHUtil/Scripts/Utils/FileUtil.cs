@@ -58,7 +58,11 @@ namespace SHUtil
             var cipher = new byte[plain.Length];
             var tag    = new byte[TAG_SIZE];
 
-            using (var aesGcm = new AesGcm(key))
+            using (var aesGcm = new AesGcm(key
+#if NET8_0_OR_GREATER
+                , TAG_SIZE
+#endif
+                ))
                 aesGcm.Encrypt(nonce, plain, cipher, tag);
 
             var dstDir = Path.GetDirectoryName(dstFilePath);
@@ -99,7 +103,11 @@ namespace SHUtil
 
             try
             {
-                using (var aesGcm = new AesGcm(key))
+                using (var aesGcm = new AesGcm(key
+#if NET8_0_OR_GREATER
+                    , TAG_SIZE
+#endif
+                    ))
                     aesGcm.Decrypt(nonce, cipher, tag, plain);
 
                 return plain;
