@@ -25,10 +25,10 @@ namespace SHUtil
     /// </summary>
     public static class FileUtil
     {
-        private const int SALT_SIZE         = 16;
-        private const int NONCE_SIZE        = 12;   // AES-GCM 표준 nonce 크기
-        private const int TAG_SIZE          = 16;   // AES-GCM 인증 태그 크기
-        private const int KEY_SIZE          = 32;   // AES-256
+        private const int SALT_SIZE = 16;
+        private const int NONCE_SIZE = 12;   // AES-GCM 표준 nonce 크기
+        private const int TAG_SIZE = 16;   // AES-GCM 인증 태그 크기
+        private const int KEY_SIZE = 32;   // AES-256
         private const int PBKDF2_ITERATIONS = 600_000;
 
         private static readonly HashAlgorithmName PBKDF2_HASH = HashAlgorithmName.SHA256;
@@ -48,32 +48,36 @@ namespace SHUtil
                 string.IsNullOrWhiteSpace(password))
                 return false;
 
-            var salt  = new byte[SALT_SIZE];
+            var salt = new byte[SALT_SIZE];
             var nonce = new byte[NONCE_SIZE];
             RandomNumberGenerator.Fill(salt);
             RandomNumberGenerator.Fill(nonce);
 
-            var key    = DeriveKey(password, salt);
-            var plain  = File.ReadAllBytes(srcFilePath);
+            var key = DeriveKey(password, salt);
+            var plain = File.ReadAllBytes(srcFilePath);
             var cipher = new byte[plain.Length];
-            var tag    = new byte[TAG_SIZE];
+            var tag = new byte[TAG_SIZE];
 
-            using (var aesGcm = new AesGcm(key
 #if NET8_0_OR_GREATER
-                , TAG_SIZE
-#endif
-                ))
+            using (var aesGcm = new AesGcm(key, TAG_SIZE))
+            {
                 aesGcm.Encrypt(nonce, plain, cipher, tag);
-
+            }
+#else
+            using (var aesGcm = new AesGcm(key))
+            {
+                aesGcm.Encrypt(nonce, plain, cipher, tag);
+            }
+#endif
             var dstDir = Path.GetDirectoryName(dstFilePath);
             if (!string.IsNullOrEmpty(dstDir) && !Directory.Exists(dstDir))
                 Directory.CreateDirectory(dstDir);
 
             using (var fs = new FileStream(dstFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                fs.Write(salt,   0, salt.Length);
-                fs.Write(nonce,  0, nonce.Length);
-                fs.Write(tag,    0, tag.Length);
+                fs.Write(salt, 0, salt.Length);
+                fs.Write(nonce, 0, nonce.Length);
+                fs.Write(tag, 0, tag.Length);
                 fs.Write(cipher, 0, cipher.Length);
             }
 
@@ -93,22 +97,27 @@ namespace SHUtil
             if (allBytes.Length <= headerSize)
                 return null;
 
-            var salt   = allBytes[..SALT_SIZE];
-            var nonce  = allBytes[SALT_SIZE..(SALT_SIZE + NONCE_SIZE)];
-            var tag    = allBytes[(SALT_SIZE + NONCE_SIZE)..(SALT_SIZE + NONCE_SIZE + TAG_SIZE)];
+            var salt = allBytes[..SALT_SIZE];
+            var nonce = allBytes[SALT_SIZE..(SALT_SIZE + NONCE_SIZE)];
+            var tag = allBytes[(SALT_SIZE + NONCE_SIZE)..(SALT_SIZE + NONCE_SIZE + TAG_SIZE)];
             var cipher = allBytes[(SALT_SIZE + NONCE_SIZE + TAG_SIZE)..];
 
-            var key   = DeriveKey(password, salt);
+            var key = DeriveKey(password, salt);
             var plain = new byte[cipher.Length];
 
             try
             {
-                using (var aesGcm = new AesGcm(key
 #if NET8_0_OR_GREATER
-                    , TAG_SIZE
-#endif
-                    ))
+                using (var aesGcm = new AesGcm(key, TAG_SIZE))
+                {
                     aesGcm.Decrypt(nonce, cipher, tag, plain);
+                }
+#else
+                using (var aesGcm = new AesGcm(key))
+                {
+                    aesGcm.Decrypt(nonce, cipher, tag, plain);
+                }
+#endif
 
                 return plain;
             }
